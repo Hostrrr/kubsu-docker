@@ -62,6 +62,8 @@ jobs:
           SSH_KEY_B64: ${{ secrets.SSH_PRIVATE_KEY_B64 }}
         run: |
           mkdir -p ~/.ssh
+          # macOS uses -D, linux uses -d
+          echo "$SSH_KEY_B64" | base64 -D > ~/.ssh/id_ed25519 2>/dev/null || \
           echo "$SSH_KEY_B64" | base64 -d > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p 58529 kubsu.tyvik.ru >> ~/.ssh/known_hosts
