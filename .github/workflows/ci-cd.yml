@@ -1,0 +1,93 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  # ── Stage 1: Build + Test (GitHub-hosted) ──
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: kubsu
+          POSTGRES_PASSWORD: kubsu
+          POSTGRES_DB: kubsu
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t kubsu-app:${{ github.sha }} .
+
+      - name: Run tests inside container
+        run: |
+          docker run --rm \
+            --network host \
+            -e DATABASE_URL=postgresql+psycopg://kubsu:kubsu@127.0.0.1:5432/kubsu \
+            kubsu-app:${{ github.sha }} \
+            python -m pytest tests/ -v
+
+      - name: Save image as tar.gz
+        run: docker save kubsu-app:${{ github.sha }} | gzip > kubsu-app.tar.gz
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kubsu-app-image
+          path: kubsu-app.tar.gz
+          retention-days: 1
+
+  # ── Stage 2: Deploy (self-hosted runner на маке) ──
+  deploy:
+    runs-on: self-hosted
+    needs: build-and-test
+
+    steps:
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: kubsu-app-image
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p 58529 kubsu.tyvik.ru >> ~/.ssh/known_hosts
+
+      - name: Copy image to university server
+        run: |
+          scp -P 58529 -i ~/.ssh/id_ed25519 \
+            kubsu-app.tar.gz \
+            huang@kubsu.tyvik.ru:~/kubsu-app.tar.gz
+
+      - name: Deploy on university server
+        run: |
+          ssh -p 58529 -i ~/.ssh/id_ed25519 huang@kubsu.tyvik.ru << 'ENDSSH'
+            set -e
+
+            podman load < ~/kubsu-app.tar.gz
+
+            IMAGE=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep kubsu-app | head -1)
+
+            podman stop kubsu-app 2>/dev/null || true
+            podman rm   kubsu-app 2>/dev/null || true
+
+            podman run -d \
+              --name kubsu-app \
+              --restart unless-stopped \
+              -p 8065:8065 \
+              -e DATABASE_URL=postgresql+psycopg://kubsu:kubsu@127.0.0.1:5432/kubsu \
+              "$IMAGE"
+          ENDSSH
