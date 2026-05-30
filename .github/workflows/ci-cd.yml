@@ -70,8 +70,9 @@ jobs:
             podman rm   kubsu-app 2>/dev/null || true
             podman run -d \
               --name kubsu-app \
-              --restart unless-stopped \
               --network=host \
               -e DATABASE_URL=postgresql+psycopg://kubsu:kubsu@127.0.0.1:5432/kubsu \
               "$IMAGE"
+            sleep 2
+            podman ps | grep kubsu-app && echo "Container is running"
           ENDSSH
