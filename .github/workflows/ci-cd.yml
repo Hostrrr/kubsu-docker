@@ -57,23 +57,14 @@ jobs:
         with:
           name: kubsu-app-image
 
-      - name: Check secret is set
-        run: |
-          if [ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]; then
-            echo "ERROR: SSH_PRIVATE_KEY secret is empty!"
-            exit 1
-          else
-            echo "Secret is set, length: $(echo '${{ secrets.SSH_PRIVATE_KEY }}' | wc -c)"
-          fi
-
       - name: Setup SSH key
+        env:
+          SSH_KEY_B64: ${{ secrets.SSH_PRIVATE_KEY_B64 }}
         run: |
           mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          echo "$SSH_KEY_B64" | base64 -d > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p 58529 kubsu.tyvik.ru >> ~/.ssh/known_hosts
-        env:
-          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
 
       - name: Copy image to university server
         run: |
