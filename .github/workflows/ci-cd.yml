@@ -59,8 +59,13 @@ jobs:
 
       - name: Add server to known_hosts
         run: |
+          set -x
+          echo "HOME=$HOME"
+          echo "USER=$USER"
           mkdir -p ~/.ssh
+          echo "mkdir ok"
           ssh-keyscan -p 58529 kubsu.tyvik.ru >> ~/.ssh/known_hosts
+          echo "keyscan ok"
 
       - name: Copy image to university server
         run: |
