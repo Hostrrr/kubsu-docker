@@ -2,6 +2,15 @@ name: CI/CD
 on:
   push:
     branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -19,33 +28,37 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://kubsu:kubsu@127.0.0.1:5432/kubsu
     steps:
       - uses: actions/checkout@v4
-      - name: Build Docker image
-        run: docker build -t kubsu-app:${{ github.sha }} .
-      - name: Run tests inside container
-        run: |
-          docker run --rm \
-            --network host \
-            -e DATABASE_URL=postgresql+psycopg://kubsu:kubsu@127.0.0.1:5432/kubsu \
-            kubsu-app:${{ github.sha }} \
-            python -m pytest tests/ -v
-      - name: Save image as tar.gz
-        run: docker save kubsu-app:${{ github.sha }} | gzip > kubsu-app.tar.gz
-      - name: Upload image artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/setup-python@v5
         with:
-          name: kubsu-app-image
-          path: kubsu-app.tar.gz
-          retention-days: 1
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install ".[test]"
+      - name: Run tests
+        run: pytest tests -v
+      - name: Log in to container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push Docker image
+        run: |
+          docker build \
+            -t ${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            -t ${{ env.IMAGE_NAME }}:latest \
+            .
+          docker push ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          docker push ${{ env.IMAGE_NAME }}:latest
   deploy:
     runs-on: self-hosted
     needs: build-and-test
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}:${{ github.sha }}
     steps:
-      - name: Download image artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: kubsu-app-image
       - name: Add server to known_hosts
         run: |
           set -x
@@ -55,24 +68,22 @@ jobs:
           echo "mkdir ok"
           ssh-keyscan -p 58529 kubsu.tyvik.ru >> ~/.ssh/known_hosts
           echo "keyscan ok"
-      - name: Copy image to university server
+      - name: Log in to container registry on server
         run: |
-          scp -P 58529 \
-            kubsu-app.tar.gz \
-            huang@kubsu.tyvik.ru:~/kubsu-app.tar.gz
+          echo "${{ secrets.GITHUB_TOKEN }}" | ssh -p 58529 huang@kubsu.tyvik.ru \
+            "podman login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin"
       - name: Deploy on university server
         run: |
-          ssh -p 58529 huang@kubsu.tyvik.ru << 'ENDSSH'
+          ssh -p 58529 huang@kubsu.tyvik.ru << ENDSSH
             set -e
-            podman load < ~/kubsu-app.tar.gz
-            IMAGE=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep kubsu-app | head -1)
+            podman pull ${{ env.IMAGE }}
             podman stop kubsu-app 2>/dev/null || true
             podman rm   kubsu-app 2>/dev/null || true
             podman run -d \
               --name kubsu-app \
               --network=host \
               -e DATABASE_URL=postgresql+psycopg://kubsu:kubsu@127.0.0.1:5432/kubsu \
-              "$IMAGE"
+              ${{ env.IMAGE }}
             sleep 2
             podman ps | grep kubsu-app && echo "Container is running"
           ENDSSH
