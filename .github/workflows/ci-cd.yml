@@ -57,26 +57,20 @@ jobs:
         with:
           name: kubsu-app-image
 
-      - name: Setup SSH key
-        env:
-          SSH_KEY_B64: ${{ secrets.SSH_PRIVATE_KEY_B64 }}
+      - name: Add server to known_hosts
         run: |
           mkdir -p ~/.ssh
-          # macOS uses -D, linux uses -d
-          echo "$SSH_KEY_B64" | base64 -D > ~/.ssh/id_ed25519 2>/dev/null || \
-          echo "$SSH_KEY_B64" | base64 -d > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p 58529 kubsu.tyvik.ru >> ~/.ssh/known_hosts
 
       - name: Copy image to university server
         run: |
-          scp -P 58529 -i ~/.ssh/id_ed25519 \
+          scp -P 58529 \
             kubsu-app.tar.gz \
             huang@kubsu.tyvik.ru:~/kubsu-app.tar.gz
 
       - name: Deploy on university server
         run: |
-          ssh -p 58529 -i ~/.ssh/id_ed25519 huang@kubsu.tyvik.ru << 'ENDSSH'
+          ssh -p 58529 huang@kubsu.tyvik.ru << 'ENDSSH'
             set -e
             podman load < ~/kubsu-app.tar.gz
             IMAGE=$(podman images --format "{{.Repository}}:{{.Tag}}" | grep kubsu-app | head -1)
