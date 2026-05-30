@@ -85,6 +85,7 @@ jobs:
               --name kubsu-app \
               --restart unless-stopped \
               -p 8065:8065 \
-              -e DATABASE_URL=postgresql+psycopg://kubsu:kubsu@127.0.0.1:5432/kubsu \
+              --add-host=host.containers.internal:host-gateway \
+              -e DATABASE_URL=postgresql+psycopg://kubsu:kubsu@host.containers.internal:5432/kubsu \
               "$IMAGE"
           ENDSSH
