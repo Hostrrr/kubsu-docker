@@ -1,13 +1,10 @@
 name: CI/CD
-
 on:
   push:
     branches: [main]
-
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
-
     services:
       postgres:
         image: postgres:16-alpine
@@ -22,13 +19,10 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Build Docker image
         run: docker build -t kubsu-app:${{ github.sha }} .
-
       - name: Run tests inside container
         run: |
           docker run --rm \
@@ -36,27 +30,22 @@ jobs:
             -e DATABASE_URL=postgresql+psycopg://kubsu:kubsu@127.0.0.1:5432/kubsu \
             kubsu-app:${{ github.sha }} \
             python -m pytest tests/ -v
-
       - name: Save image as tar.gz
         run: docker save kubsu-app:${{ github.sha }} | gzip > kubsu-app.tar.gz
-
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
         with:
           name: kubsu-app-image
           path: kubsu-app.tar.gz
           retention-days: 1
-
   deploy:
     runs-on: self-hosted
     needs: build-and-test
-
     steps:
       - name: Download image artifact
         uses: actions/download-artifact@v4
         with:
           name: kubsu-app-image
-
       - name: Add server to known_hosts
         run: |
           set -x
@@ -66,13 +55,11 @@ jobs:
           echo "mkdir ok"
           ssh-keyscan -p 58529 kubsu.tyvik.ru >> ~/.ssh/known_hosts
           echo "keyscan ok"
-
       - name: Copy image to university server
         run: |
           scp -P 58529 \
             kubsu-app.tar.gz \
             huang@kubsu.tyvik.ru:~/kubsu-app.tar.gz
-
       - name: Deploy on university server
         run: |
           ssh -p 58529 huang@kubsu.tyvik.ru << 'ENDSSH'
@@ -84,8 +71,7 @@ jobs:
             podman run -d \
               --name kubsu-app \
               --restart unless-stopped \
-              -p 8065:8065 \
-              --add-host=host.containers.internal:host-gateway \
-              -e DATABASE_URL=postgresql+psycopg://kubsu:kubsu@host.containers.internal:5432/kubsu \
+              --network=host \
+              -e DATABASE_URL=postgresql+psycopg://kubsu:kubsu@127.0.0.1:5432/kubsu \
               "$IMAGE"
           ENDSSH
